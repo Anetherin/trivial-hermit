@@ -1,0 +1,797 @@
+<style>
+:root{--bg:#14141a;--panel:#1e1e27;--ink:#e8e6f0;--muted:#8b88a0;--acc:#c0577a;--line:#2e2c3a;--dialogue:#d8d4ea}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+#app{max-width:820px;margin:0 auto;padding:12px;display:flex;flex-direction:column;height:100vh}
+header{display:flex;gap:8px;align-items:center}
+header h1{font-size:17px;margin:0;flex:1}
+button{background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:7px 11px;font:inherit;cursor:pointer}
+button.primary{background:var(--acc);border-color:var(--acc)}
+button:disabled{opacity:.5}
+button.mini{flex:0 0 auto;padding:4px 9px}
+input,textarea,select{width:100%;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px;padding:8px;font:inherit}
+input[type=color]{flex:0 0 44px;width:44px;height:36px;padding:2px}
+#sceneWrap{margin:8px 0}
+#sceneWrap summary{cursor:pointer;font-size:12px;color:var(--muted)}
+#scene{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:6px}
+.shot{border-radius:10px;overflow:hidden;max-height:45vh}
+#imgBar{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px;margin:6px 0}
+#imgBar textarea{background:var(--bg)}
+#log{flex:1;overflow-y:auto;padding:8px 0}
+.msg{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin:8px 0;white-space:pre-wrap}
+.msg.old{opacity:.45}
+.who{font-size:12px;color:var(--muted);display:flex;gap:6px;align-items:center;white-space:normal}
+.who span{flex:1;font-weight:600}
+.who button{padding:0 7px;font-size:12px}
+.who small{font-size:11px}
+.chips{font-size:12px;color:var(--muted);margin-top:6px;white-space:normal}
+em{opacity:.8}
+#composer{display:flex;gap:8px}
+#composer textarea{height:60px;resize:vertical}
+#tools{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+#status{font-size:12px;color:var(--muted);min-height:18px}
+#drawer{position:fixed;inset:0;background:var(--bg);overflow-y:auto;padding:16px;display:none;z-index:5}
+#drawer.open{display:block}
+#drawer section{max-width:820px;margin:0 auto 18px}
+#drawer h2{font-size:15px;color:var(--acc);margin:18px 0 6px}
+label{display:block;font-size:12px;color:var(--muted);margin:8px 0 3px}
+label.inline{display:flex;align-items:center;gap:5px;margin:0;flex:0 0 auto;white-space:nowrap}
+label.inline input{width:auto}
+.hint{font-size:12px;color:var(--muted)}
+.npc{border:1px solid var(--line);border-left-width:4px;border-radius:10px;padding:8px;margin:10px 0}
+.genbox{border:1px dashed var(--line);border-radius:10px;padding:8px;margin:10px 0}
+.pending{border:1px dashed var(--acc);border-radius:8px;padding:8px;margin-top:8px;font-size:13px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.row > input:not([type=color]):not([type=checkbox]),.row > div{flex:1;min-width:120px}
+#sysPreview{white-space:pre-wrap;font-size:12px;background:var(--panel);border-radius:8px;padding:8px;max-height:300px;overflow:auto}
+#sysPreview:empty{display:none}
+#modelList button{margin:3px 3px 0 0;font-size:12px;padding:3px 8px}
+</style>
+
+<div id="app">
+  <header><h1 id="title">Tavern-lite</h1><button id="openSettings">⚙ Setup</button></header>
+  <details id="sceneWrap" open hidden>
+    <summary>Scene images</summary>
+    <div id="scene"></div>
+  </details>
+  <div id="imgBar" hidden>
+    <textarea id="imgPrompt" rows="4" placeholder="Image prompt. Character looks are filled in from the dossiers; edit freely. The image style from Setup is appended."></textarea>
+    <div class="row" style="margin-top:6px">
+      <button class="primary" id="imgGen">Generate</button>
+      <button id="imgRewrite">✨ Rewrite from scene</button>
+      <label class="inline"><input type="checkbox" data-bind="cfg.autoImage"> auto every reply</label>
+    </div>
+  </div>
+  <div id="log"></div>
+  <div id="status"></div>
+  <div id="composer">
+    <textarea id="input" placeholder="Say or do something…"></textarea>
+    <button class="primary" id="send">Send</button>
+  </div>
+  <div id="tools">
+    <button id="regen">↻ Regenerate</button>
+    <button id="imgBtn">🎨 Image</button>
+    <button id="compactNow">🗜 Compact now</button>
+  </div>
+</div>
+
+<div id="drawer">
+  <section>
+    <div class="row"><h2 style="margin:0;flex:1">Setup</h2><button id="closeSettings" class="mini">Close</button></div>
+
+    <h2>Gemini API</h2>
+    <label>API key (stored only in this browser, never in the generator source)</label>
+    <input id="apiKey" type="password" autocomplete="off">
+    <label>Model</label>
+    <div class="row"><input id="modelField" data-bind="model"><button id="listModels" class="mini">List models</button></div>
+    <div id="modelList"></div>
+
+    <h2>You</h2>
+    <label>Name and dialogue color</label>
+    <div class="row"><input type="color" data-bind="userColor"><input data-bind="userName"></div>
+    <label>About you (who your character is)</label><textarea data-bind="userDesc" rows="3"></textarea>
+    <label>Your appearance (added to image prompts when you're in the scene)</label><textarea data-bind="userLook" rows="2"></textarea>
+
+    <h2>Narrator</h2>
+    <label>Name and accent color</label>
+    <div class="row"><input type="color" data-bind="narrator.color"><input data-bind="narrator.name"></div>
+    <label>Narration style (voice, point of view, tone, pacing)</label><textarea data-bind="narrator.style" rows="4"></textarea>
+    <label>Scenario (world, setting, premise)</label><textarea data-bind="narrator.scenario" rows="4"></textarea>
+    <label>Opening message (used on a new chat)</label><textarea data-bind="narrator.greeting" rows="3"></textarea>
+
+    <h2>System prompt</h2>
+    <div class="hint" id="tplHelp"></div>
+    <textarea data-bind="systemTemplate" rows="14" style="font-size:13px;margin-top:6px"></textarea>
+    <div class="row" style="margin-top:6px">
+      <button id="previewSys" class="mini">Preview filled prompt</button>
+      <button id="resetSys" class="mini">Reset to default</button>
+    </div>
+    <pre id="sysPreview"></pre>
+
+    <h2>Reply tags</h2>
+    <div class="hint">Instructions the model gets through the tagRules macro. Tags are read out of each reply and stripped from what you see.</div>
+    <label class="inline" style="margin-top:6px"><input type="checkbox" data-bind="cfg.sayTags"> Color-tag dialogue by speaker</label>
+    <label class="inline" style="margin-top:6px"><input type="checkbox" data-bind="cfg.npcTags"> Character dossier updates inside replies</label>
+    <label class="inline" style="margin-top:6px"><input type="checkbox" data-bind="cfg.sceneTags"> Scene image prompt with every reply</label>
+    <label>Scene prompt rules (how Gemini writes image prompts)</label>
+    <textarea data-bind="cfg.sceneRules" rows="7" style="font-size:13px"></textarea>
+    <button id="resetScene" class="mini" style="margin-top:6px">Reset scene rules</button>
+
+    <h2>Images</h2>
+    <label>Style (appended to every image prompt)</label><input data-bind="imageStyle">
+    <div class="row">
+      <div><label>Resolution</label><select data-bind="cfg.imgRes"><option>768x512</option><option>512x768</option><option>512x512</option></select></div>
+      <div><label>Images per generate</label><select data-bind="cfg.imgCount"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
+    </div>
+
+    <h2>Memory</h2>
+    <label>Story summary (written by compaction; editable)</label><textarea data-bind="summary" rows="6"></textarea>
+    <div class="row">
+      <div><label>Keep recent messages verbatim</label><input type="number" data-bind="cfg.keepRecent"></div>
+      <div><label>Compact when over</label><input type="number" data-bind="cfg.compactAt"></div>
+    </div>
+
+    <h2>Characters</h2>
+    <div class="hint">Every character is a dossier. Pinned ones are always in the prompt; others are added when their name or an alias appears in the last 8 messages. Locked ones don't change automatically; the model's edits wait as suggestions.</div>
+    <div class="genbox">
+      <label style="margin-top:0">Generate characters (leave blank to fit the current story)</label>
+      <textarea id="npcIdea" rows="2" placeholder="e.g. a weary innkeeper who knows too much"></textarea>
+      <div class="row" style="margin-top:6px">
+        <label class="inline">How many <input type="number" id="npcCount" value="1" min="1" max="5" style="width:60px"></label>
+        <button id="genNpc" class="primary">✨ Generate</button>
+      </div>
+    </div>
+    <div id="npcList"></div>
+    <button id="addNpc">+ Add blank character</button>
+
+    <h2>Data</h2>
+    <div class="row">
+      <button id="exportBtn">Export story</button>
+      <input type="file" id="importFile" accept=".json">
+      <button id="newChat">New chat</button>
+    </div>
+  </section>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const QUOTE = String.fromCharCode(34);
+const API_BASE = 'https:' + '/' + '/generativelanguage.googleapis.com/v1beta/models';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const clone = x => JSON.parse(JSON.stringify(x));
+const KEY_STORE = 'tl_key', STATE_STORE = 'tl_state';
+const FIELDS = ['appearance', 'personality', 'history', 'status'];
+const PALETTE = ['#e07a5f', '#81b29a', '#f2cc8f', '#9fb4ff', '#d291bc', '#6ec6ca', '#c3a6ff', '#f4a259', '#a3c94f', '#ffd166', '#7fd8be', '#ff9e7d'];
+const cap = s => s[0].toUpperCase() + s.slice(1);
+
+const DEFAULT_STYLE = 'Third person, past tense. Vivid and sensory without purple prose. Characters have their own goals and push back. Natural, distinct dialogue for each character.';
+
+const DEFAULT_SCENE_RULES = `Write it for an image generator, which only understands concrete visual terms and has not read the story.
+- Name each character in frame (their looks are filled in automatically from the dossiers).
+- Be faithful and specific to what is happening in the prose right now: actions, body positions, physical contact, clothing and its state, expressions, props. Do not soften, omit or replace details with euphemisms or vague mood words.
+- Depict every character as an adult.
+- Then the setting, lighting, mood and camera angle or framing.
+- Comma-separated phrases, 50–100 words.`;
+
+const DEFAULT_TEMPLATE = `You are the narrator ({{narrator}}) of an ongoing interactive story. You describe the world and voice every character except {{user}}, who is controlled by the user.
+
+## Narration style
+{{style}}
+
+## Scenario
+{{scenario}}
+
+## {{user}}
+{{userPersona}}
+
+## Story so far
+{{summary}}
+
+## Characters
+{{npcs}}
+
+## Rules
+- Never write {{user}}'s dialogue, actions or thoughts.
+- Stay consistent with the story so far and the character dossiers.
+- *Actions in asterisks*. Usually 1–4 paragraphs.
+- Stop at a point where {{user}} can respond.
+
+{{tagRules}}`;
+
+const defaults = () => ({
+  v: 3,
+  model: 'gemini-flash-latest',
+  userName: 'You', userColor: '#9fd3ff', userDesc: '', userLook: '',
+  narrator: { name: 'Narrator', color: '#ff8fa3', style: DEFAULT_STYLE, scenario: '', greeting: '' },
+  imageStyle: 'anime illustration, detailed, soft lighting',
+  systemTemplate: DEFAULT_TEMPLATE,
+  messages: [], summary: '', summarizedUpTo: 0,
+  npcs: [], lastScene: '',
+  cfg: { keepRecent: 16, compactAt: 36, sayTags: true, npcTags: true, sceneTags: true, autoImage: false, imgRes: '768x512', imgCount: '2', sceneRules: DEFAULT_SCENE_RULES }
+});
+
+function validColor(c) {
+  c = String(c || '').trim();
+  if (/^#[0-9a-f]{3}$/i.test(c)) c = '#' + [...c.slice(1)].map(x => x + x).join('');
+  return /^#[0-9a-f]{6}$/i.test(c) ? c.toLowerCase() : '';
+}
+function nextColor(s = state) {
+  const used = new Set([s.narrator.color, s.userColor, ...s.npcs.map(n => n.color)].map(c => String(c || '').toLowerCase()));
+  return PALETTE.find(c => !used.has(c)) || PALETTE[s.npcs.length % PALETTE.length];
+}
+function blankNpc(name) {
+  const n = { name: name || 'New character', aliases: [], color: '', pinned: false, locked: false, pending: null };
+  FIELDS.forEach(f => n[f] = '');
+  return n;
+}
+function swipeOf(m) {
+  return { text: m.text || '', notes: m.notes || [], scene: m.scene || '', updates: [] };
+}
+
+function migrate(raw) {
+  raw = raw || {};
+  const s = Object.assign(defaults(), raw);
+  if (raw.char) { /* earlier versions had a main character with a persona */
+    const c = raw.char;
+    s.narrator = Object.assign(defaults().narrator, { color: c.color || '#ff8fa3', scenario: c.scenario || '', greeting: c.greeting || '' });
+    if (c.imageStyle) s.imageStyle = c.imageStyle;
+    s.npcs = s.npcs || [];
+    if (c.name && c.name !== 'Narrator') s.npcs.unshift(Object.assign(blankNpc(c.name), { personality: c.persona || '', pinned: true }));
+    delete s.char;
+    if (String(s.systemTemplate).includes('You voice {{char}} and every other character')) s.systemTemplate = DEFAULT_TEMPLATE;
+  }
+  s.narrator = Object.assign(defaults().narrator, s.narrator);
+  s.cfg = Object.assign(defaults().cfg, s.cfg);
+  s.npcs = (s.npcs || []).map(n => {
+    const o = Object.assign(blankNpc(n.name || 'Unnamed'), { aliases: n.aliases || [], color: validColor(n.color), pinned: !!n.pinned, locked: !!n.locked, pending: n.pending || null });
+    FIELDS.forEach(f => o[f] = n[f] || '');
+    if (n.notes && !o.history) o.history = n.notes;
+    return o;
+  });
+  s.npcs.forEach(n => { if (!n.color) n.color = nextColor(s); });
+  s.messages = (s.messages || []).map(m => {
+    if (m.role === 'model' && !m.swipes) { m.swipes = [swipeOf(m)]; m.swipeIdx = 0; }
+    return m;
+  });
+  s.v = 3;
+  return s;
+}
+
+let state;
+try { state = migrate(JSON.parse(localStorage.getItem(STATE_STORE) || '{}')); } catch (e) { state = migrate({}); }
+let apiKey = '';
+try { apiKey = localStorage.getItem(KEY_STORE) || ''; } catch (e) {}
+
+function save() {
+  try { localStorage.setItem(STATE_STORE, JSON.stringify(state)); }
+  catch (e) { setStatus('Could not save — browser storage is blocked. Use Export.'); }
+}
+function setStatus(t) { $('status').textContent = t; }
+function busy(b) { ['send', 'regen', 'imgGen', 'imgRewrite', 'compactNow', 'genNpc'].forEach(id => $(id).disabled = b); }
+function escText(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function esc(s) { return escText(s).split(QUOTE).join('&quot;'); }
+const ask = text => [{ role: 'user', parts: [{ text }] }];
+
+/* ---------- Gemini ---------- */
+async function gemini(system, contents, { temperature = 0.9 } = {}) {
+  if (!apiKey) throw new Error('Add your Gemini API key in Setup.');
+  let model = state.model.trim();
+  if (model.startsWith('models/')) model = model.slice(7);
+  const url = API_BASE + '/' + model + ':generateContent';
+  const body = { systemInstruction: { parts: [{ text: system }] }, contents, generationConfig: { temperature } };
+  for (let attempt = 0; attempt < 4; attempt++) {
+    let res;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
+        body: JSON.stringify(body)
+      });
+    } catch (netErr) {
+      if (attempt < 1) { setStatus('Connection dropped — retrying…'); await sleep(1500); continue; }
+      throw new Error(`Couldn't reach Gemini (${netErr.message}). Usually the connection dropped or the app went to the background mid-request; a content blocker or a website restriction on your API key can also cause it.`);
+    }
+    if (res.status === 429 || res.status === 503) {
+      const wait = 2000 * 2 ** attempt;
+      setStatus(`Rate limited — retrying in ${wait / 1000}s…`);
+      await sleep(wait);
+      continue;
+    }
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
+    const cand = data.candidates?.[0];
+    const text = (cand?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
+    if (!text) throw new Error(`Empty reply (${data.promptFeedback?.blockReason || cand?.finishReason || 'no text'})`);
+    return text;
+  }
+  throw new Error('Still rate limited — wait a minute and try again.');
+}
+
+function asContents(msgs) {
+  const out = [];
+  for (const m of msgs) {
+    const role = m.role === 'user' ? 'user' : 'model';
+    const last = out[out.length - 1];
+    if (last && last.role === role) last.parts[0].text += '\n\n' + m.text;
+    else out.push({ role, parts: [{ text: m.text }] });
+  }
+  if (!out.length || out[0].role !== 'user') out.unshift({ role: 'user', parts: [{ text: '(The scene begins.)' }] });
+  return out;
+}
+const stripSay = t => t.replace(/<\/?say\b[^>]*>/gi, '');
+function transcript(msgs) {
+  return msgs.map(m => `${m.role === 'user' ? state.userName : 'Story'}: ${stripSay(m.text)}`).join('\n\n');
+}
+
+/* ---------- Character lookup & colors ---------- */
+function findNpc(name) {
+  const k = String(name || '').trim().toLowerCase();
+  return state.npcs.find(n => n.name.toLowerCase() === k || (n.aliases || []).some(a => a.toLowerCase() === k));
+}
+function colorFor(who) {
+  const k = String(who || '').trim().toLowerCase();
+  if (k === state.userName.toLowerCase()) return validColor(state.userColor) || '#9fd3ff';
+  if (k === state.narrator.name.toLowerCase()) return validColor(state.narrator.color) || '#ff8fa3';
+  return validColor(findNpc(who)?.color) || 'var(--dialogue)';
+}
+function activeNpcs(msgs = state.messages) {
+  const recent = msgs.slice(-8).map(m => m.text).join('\n').toLowerCase();
+  return state.npcs.filter(n => n.pinned || [n.name, ...(n.aliases || [])].some(a => a && recent.includes(a.toLowerCase())));
+}
+
+/* ---------- System prompt ---------- */
+function npcBlock(n) {
+  const aka = n.aliases?.length ? ` (also: ${n.aliases.join(', ')})` : '';
+  return `### ${n.name}${aka}\n` + FIELDS.filter(f => n[f]).map(f => `${cap(f)}: ${n[f]}`).join('\n');
+}
+function npcFormat() {
+  const u = state.userName;
+  return `<npc name="Name" aliases="comma, separated" color="#rrggbb">
+appearance: concrete visual details an artist could draw: build, face, hair, eyes, clothing, distinguishing marks
+personality: temperament, speech style, motives
+history: background and what has happened with ${u} so far
+status: where they are, condition, current attitude toward ${u}
+</npc>`;
+}
+
+function tagRules() {
+  const c = state.cfg, u = state.userName, rules = [];
+  if (c.sayTags) {
+    const roster = state.npcs.map(n => `${n.name} ${n.color}`).join(', ') || 'none yet';
+    rules.push(`Wrap every line of spoken dialogue in a speaker tag: <say who="Name">"Line."</say>. Use the character's exact name (known: ${roster}). Never write dialogue for ${u}.`);
+  }
+  if (c.npcTags) rules.push(`After the prose, whenever a character first appears or something about them meaningfully changes, add one dossier tag per character:
+${npcFormat()}
+Include only the fields that are new or changed, each written in full (it replaces the old text). Never make tags for ${u}. For a new character, choose a color readable on a dark background and distinct from the known ones; never change an existing character's color.`);
+  if (c.sceneTags) rules.push(`End every reply with <scene>an image prompt showing the final moment of your reply</scene>. Rules for the scene prompt:\n${c.sceneRules || DEFAULT_SCENE_RULES}`);
+  if (!rules.length) return '';
+  return '## Output tags (required)\n' + rules.map((r, i) => `${i + 1}. ${r}`).join('\n');
+}
+
+function systemPrompt(msgs = state.messages) {
+  const npcs = activeNpcs(msgs);
+  const persona = [state.userDesc, state.userLook && `Appearance: ${state.userLook}`].filter(Boolean).join('\n');
+  const macros = {
+    narrator: state.narrator.name,
+    user: state.userName,
+    userPersona: persona || '(not specified)',
+    style: state.narrator.style || DEFAULT_STYLE,
+    scenario: state.narrator.scenario || '(not specified)',
+    summary: state.summary || '(nothing yet — the story is just starting)',
+    npcs: npcs.length ? npcs.map(npcBlock).join('\n\n') : '(none in the current scene)',
+    tagRules: tagRules()
+  };
+  macros.char = macros.narrator;
+  macros.persona = macros.style;
+  return state.systemTemplate.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in macros ? macros[k] : m));
+}
+
+/* ---------- Reading tags out of replies ---------- */
+function attr(attrs, name) {
+  const m = attrs.match(new RegExp(name + '\\s*=\\s*' + QUOTE + '([^' + QUOTE + ']*)' + QUOTE, 'i'));
+  return m ? m[1].trim() : '';
+}
+function parseReply(raw) {
+  const updates = [];
+  let scene = '';
+  let text = raw.replace(/<npc\b([^>]*)>([\s\S]*?)<\/npc>/gi, (_, attrs, body) => {
+    const u = { name: attr(attrs, 'name'), aliases: attr(attrs, 'aliases'), color: attr(attrs, 'color'), fields: {} };
+    let cur = null;
+    for (const line of body.split('\n')) {
+      const m = line.match(/^\s*(appearance|personality|history|status)\s*:\s*(.*)$/i);
+      if (m) { cur = m[1].toLowerCase(); u.fields[cur] = m[2].trim(); }
+      else if (cur && line.trim()) u.fields[cur] += ' ' + line.trim();
+    }
+    updates.push(u);
+    return '';
+  });
+  text = text.replace(/<scene>([\s\S]*?)<\/scene>/gi, (_, s) => { scene = s.trim(); return ''; });
+  text = text.replace(/<\/?(npc|scene)\b[^>]*>/gi, '').trim();
+  return { text, updates, scene };
+}
+
+function applyUpdate(u) {
+  if (!u.name) return null;
+  const k = u.name.toLowerCase();
+  if (k === state.userName.toLowerCase() || k === state.narrator.name.toLowerCase()) return null;
+  const aliases = u.aliases ? u.aliases.split(',').map(s => s.trim()).filter(Boolean) : [];
+  let n = findNpc(u.name);
+  if (!n) {
+    n = Object.assign(blankNpc(u.name), { aliases });
+    FIELDS.forEach(f => n[f] = u.fields[f] || '');
+    n.color = validColor(u.color) || nextColor();
+    state.npcs.push(n);
+    return { name: n.name, kind: 'added' };
+  }
+  if (n.locked) {
+    n.pending = Object.assign(n.pending || {}, u.fields);
+    if (aliases.length) n.pending.aliases = aliases.join(', ');
+    return { name: n.name, kind: 'suggestion pending' };
+  }
+  FIELDS.forEach(f => { if (u.fields[f]) n[f] = u.fields[f]; });
+  n.aliases = [...new Set([...(n.aliases || []), ...aliases])];
+  return { name: n.name, kind: 'updated' };
+}
+
+/* ---------- Image prompts: fill each named character's looks in ---------- */
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function expandScene(scene) {
+  let out = String(scene || '');
+  const people = [{ names: [state.userName], look: state.userLook }, ...state.npcs.map(n => ({ names: [n.name, ...(n.aliases || [])], look: n.appearance }))];
+  for (const p of people) {
+    const look = String(p.look || '').trim().replace(/\s+/g, ' ').slice(0, 300);
+    if (!look) continue;
+    for (const nm of p.names.filter(Boolean)) {
+      const re = new RegExp('\\b' + escapeRe(nm) + '\\b', 'i');
+      if (re.test(out)) { out = out.replace(re, m => `${m} (${look})`); break; }
+    }
+  }
+  return out;
+}
+function setScene(scene) {
+  if (!scene) return;
+  state.lastScene = expandScene(scene);
+  $('imgPrompt').value = state.lastScene;
+}
+
+/* ---------- Chat & swipes ---------- */
+function showSwipe(m, idx, isLast) {
+  m.swipeIdx = Math.max(0, Math.min(idx, m.swipes.length - 1));
+  const sw = m.swipes[m.swipeIdx];
+  if (isLast && m.prevNpcs) { /* dossiers follow whichever version of the last reply is showing */
+    state.npcs = clone(m.prevNpcs);
+    sw.notes = (sw.updates || []).map(applyUpdate).filter(Boolean);
+  }
+  m.text = sw.text; m.notes = sw.notes; m.scene = sw.scene;
+  if (isLast) setScene(sw.scene);
+}
+
+async function reply(asSwipe = false) {
+  const last = state.messages[state.messages.length - 1];
+  if (asSwipe && last?.role !== 'model') asSwipe = false;
+  const history = asSwipe ? state.messages.slice(state.summarizedUpTo, -1) : state.messages.slice(state.summarizedUpTo);
+  const saved = state.npcs;
+  const base = asSwipe && last.prevNpcs ? clone(last.prevNpcs) : clone(state.npcs);
+  busy(true);
+  setStatus(`${state.narrator.name} is writing…`);
+  try {
+    state.npcs = clone(base);
+    const raw = await gemini(systemPrompt(history), asContents(history));
+    const { text, updates, scene } = parseReply(raw);
+    const sw = { text: text || '(empty reply)', notes: [], scene, updates };
+    if (asSwipe) {
+      if (!last.swipes) { last.swipes = [swipeOf(last)]; last.swipeIdx = 0; }
+      last.prevNpcs = base;
+      last.swipes.push(sw);
+      showSwipe(last, last.swipes.length - 1, true);
+    } else {
+      state.messages.forEach(m => delete m.prevNpcs);
+      const m = { role: 'model', swipes: [sw], swipeIdx: 0, prevNpcs: base };
+      state.messages.push(m);
+      showSwipe(m, 0, true);
+    }
+    if (scene && state.cfg.autoImage) drawImages(state.lastScene);
+    save(); render(); renderNpcs(); setStatus('');
+    if (state.messages.length - state.summarizedUpTo > state.cfg.compactAt) {
+      try { await compact(); } catch (e) { setStatus('Compaction skipped: ' + e.message); }
+    }
+  } catch (e) {
+    state.npcs = saved;
+    setStatus('⚠ ' + e.message);
+  } finally {
+    busy(false);
+  }
+}
+
+/* ---------- Memory compaction ---------- */
+async function compact(force = false) {
+  const end = state.messages.length - state.cfg.keepRecent;
+  if (end <= state.summarizedUpTo) { if (force) setStatus('Nothing old enough to compact yet.'); return; }
+  setStatus('Compacting memory…');
+  const sys = `You maintain the long-term memory of an interactive story. Rewrite the summary so it includes the new events. Keep: key plot events in order, decisions ${state.userName} made, promises, relationships and how they changed, injuries, items, locations, and unresolved threads. Drop filler. Past tense, under 450 words. Output only the summary.`;
+  const input = `Current summary:\n${state.summary || '(none)'}\n\nNew events to fold in:\n${transcript(state.messages.slice(state.summarizedUpTo, end))}`;
+  state.summary = await gemini(sys, ask(input), { temperature: 0.3 });
+  state.summarizedUpTo = end;
+  save(); render(); setStatus('Memory compacted.');
+}
+
+/* ---------- Character generator ---------- */
+async function generateNpcs() {
+  const count = Math.max(1, Math.min(5, Number($('npcCount').value) || 1));
+  const idea = $('npcIdea').value.trim();
+  busy(true);
+  setStatus('Creating characters…');
+  try {
+    const taken = state.npcs.map(n => `${n.name} ${n.color}`).join(', ') || 'none';
+    const sys = `You create characters for an interactive story. Output exactly ${count} dossier tag${count > 1 ? 's' : ''} and nothing else, in this format:
+${npcFormat()}
+Fill every field. Appearance must be concrete and visual so an image generator can draw them. History covers their background and how they connect to the scenario. Status covers where they are now and their attitude toward ${state.userName}. Give each a color readable on a dark background. Existing characters (don't reuse these names or colors): ${taken}.`;
+    const input = `Scenario:\n${state.narrator.scenario || '(none)'}\n\nStory so far:\n${state.summary || '(none)'}\n\nRecent events:\n${transcript(state.messages.slice(-6)) || '(none)'}\n\nRequest: ${idea || 'Characters who would fit naturally into the current story.'}`;
+    const { updates } = parseReply(await gemini(sys, ask(input), { temperature: 1 }));
+    const done = updates.map(applyUpdate).filter(Boolean);
+    if (!done.length) throw new Error('No characters came back — try again.');
+    $('npcIdea').value = '';
+    save(); renderNpcs(); render();
+    setStatus(`Created: ${done.map(d => d.name).join(', ')}`);
+  } catch (e) {
+    setStatus('⚠ ' + e.message);
+  } finally {
+    busy(false);
+  }
+}
+
+/* ---------- Images ---------- */
+function drawImages(p) {
+  p = String(p || '').trim();
+  if (!p) { setStatus('No image prompt yet — send a message or write one.'); return; }
+  const style = state.imageStyle.trim();
+  const prompt = style ? `${p}, ${style}` : p;
+  const count = Math.max(1, Math.min(4, Number(state.cfg.imgCount) || 2));
+  try {
+    let html = '';
+    for (let i = 0; i < count; i++) html += `<div class="shot">${t2i({ prompt, resolution: state.cfg.imgRes || '768x512' })}</div>`;
+    $('scene').innerHTML = html;
+    $('sceneWrap').hidden = false;
+    $('sceneWrap').open = true;
+  } catch (e) { setStatus('⚠ Image plugin error: ' + e.message); }
+}
+
+async function rewriteScenePrompt() {
+  busy(true);
+  try {
+    setStatus('Writing image prompt…');
+    const present = activeNpcs().map(n => n.name).concat(state.userName).join(', ');
+    const sys = `Turn the latest moment of a story into one image prompt. Characters who may be in frame: ${present}.\n${state.cfg.sceneRules || DEFAULT_SCENE_RULES}\nOutput only the prompt.`;
+    const latest = state.messages.slice(-4).map(m => stripSay(m.text)).join('\n\n');
+    setScene(await gemini(sys, ask(`Latest moment:\n${latest}`), { temperature: 0.5 }));
+    save(); setStatus('Prompt ready — edit it or hit Generate.');
+  } catch (e) {
+    setStatus('⚠ ' + e.message);
+  } finally {
+    busy(false);
+  }
+}
+
+/* ---------- Rendering ---------- */
+function fmt(t) { return escText(t).replace(/\*([^*\n]+)\*/g, '<em>$1</em>'); }
+function quoteColor(html, color) {
+  const re = new RegExp(QUOTE + '[^' + QUOTE + '\\n]+' + QUOTE + '|“[^”\\n]+”', 'g');
+  return html.replace(re, q => `<span style="color:${color}">${q}</span>`);
+}
+function renderText(m) {
+  if (m.role === 'user') return quoteColor(fmt(m.text), colorFor(state.userName));
+  const re = new RegExp('<say\\s+who=' + QUOTE + '([^' + QUOTE + ']*)' + QUOTE + '\\s*>([\\s\\S]*?)</say>', 'gi');
+  let out = '', last = 0, mt;
+  while ((mt = re.exec(m.text))) {
+    out += quoteColor(fmt(m.text.slice(last, mt.index)), 'var(--dialogue)');
+    out += `<span style="color:${colorFor(mt[1])}">${fmt(mt[2])}</span>`;
+    last = re.lastIndex;
+  }
+  return out + quoteColor(fmt(m.text.slice(last)), 'var(--dialogue)');
+}
+
+function render() {
+  $('title').textContent = state.narrator.name || 'Tavern-lite';
+  const log = $('log');
+  log.innerHTML = '';
+  const lastIdx = state.messages.length - 1;
+  state.messages.forEach((m, i) => {
+    const old = i < state.summarizedUpTo;
+    const who = m.role === 'user' ? state.userName : state.narrator.name;
+    const d = document.createElement('div');
+    d.className = `msg${old ? ' old' : ''}`;
+    d.style.borderLeft = `3px solid ${colorFor(who)}`;
+    let ctrls = '';
+    if (m.role === 'model') {
+      const n = m.swipes?.length || 1;
+      if (n > 1) ctrls += `<button data-prev="${i}">‹</button><small>${(m.swipeIdx || 0) + 1}/${n}</small><button data-next="${i}">›</button>`;
+      if (i === lastIdx) ctrls += `<button data-regen="${i}" title="New version">↻</button>`;
+      if (m.scene) ctrls += `<button data-pic="${i}" title="Draw this moment">🎨</button>`;
+    }
+    let html = `<div class="who"><span style="color:${colorFor(who)}">${escText(who)}${old ? ' · in summary' : ''}</span>${ctrls}<button data-edit="${i}">✎</button><button data-del="${i}">✕</button></div><div>${renderText(m)}</div>`;
+    const chips = (m.notes || []).map(x => `<span style="color:${colorFor(x.name)}">${escText(x.name)}</span> ${x.kind}`).join(' · ');
+    if (chips) html += `<div class="chips">📇 ${chips}</div>`;
+    d.innerHTML = html;
+    log.append(d);
+  });
+  log.scrollTop = log.scrollHeight;
+}
+
+function renderNpcs() {
+  const box = $('npcList');
+  box.innerHTML = '';
+  state.npcs.forEach((n, i) => {
+    const d = document.createElement('div');
+    d.className = 'npc';
+    d.style.borderLeftColor = n.color;
+    const pending = n.pending ? `<div class="pending"><b>Suggested update</b>${Object.entries(n.pending).map(([k, v]) => `<div><i>${esc(k)}:</i> ${escText(v)}</div>`).join('')}<div class="row" style="margin-top:6px"><button data-accept class="mini">Accept</button><button data-dismiss class="mini">Dismiss</button></div></div>` : '';
+    d.innerHTML = `<div class="row"><input type="color" data-f="color" value="${esc(n.color)}"><input data-f="name" value="${esc(n.name)}"><button data-rm class="mini">✕</button></div>
+<div class="row" style="margin-top:6px"><label class="inline"><input type="checkbox" data-f="pinned" ${n.pinned ? 'checked' : ''}> always in prompt</label><label class="inline"><input type="checkbox" data-f="locked" ${n.locked ? 'checked' : ''}> lock</label></div>
+<label>Aliases (comma-separated)</label><input data-f="aliases" value="${esc((n.aliases || []).join(', '))}">
+${FIELDS.map(f => `<label>${cap(f)}</label><textarea data-f="${f}" rows="${f === 'history' ? 4 : 2}">${escText(n[f])}</textarea>`).join('')}
+${pending}`;
+    const onEdit = e => {
+      const f = e.target.dataset.f;
+      if (!f) return;
+      n[f] = (f === 'locked' || f === 'pinned') ? e.target.checked
+           : f === 'aliases' ? e.target.value.split(',').map(s => s.trim()).filter(Boolean)
+           : e.target.value;
+      if (f === 'color') d.style.borderLeftColor = n.color;
+      save();
+      if (f === 'color' || f === 'name') render();
+    };
+    d.addEventListener('input', onEdit);
+    d.addEventListener('change', onEdit);
+    d.querySelector('[data-rm]').onclick = () => {
+      if (confirm(`Delete ${n.name}?`)) { state.npcs.splice(i, 1); save(); renderNpcs(); }
+    };
+    const acc = d.querySelector('[data-accept]'), dis = d.querySelector('[data-dismiss]');
+    if (acc) acc.onclick = () => {
+      FIELDS.forEach(f => { if (n.pending[f]) n[f] = n.pending[f]; });
+      if (n.pending.aliases) n.aliases = [...new Set([...(n.aliases || []), ...n.pending.aliases.split(',').map(s => s.trim()).filter(Boolean)])];
+      n.pending = null; save(); renderNpcs();
+    };
+    if (dis) dis.onclick = () => { n.pending = null; save(); renderNpcs(); };
+    box.append(d);
+  });
+}
+
+function bindFields() {
+  document.querySelectorAll('[data-bind]').forEach(el => {
+    const path = el.dataset.bind.split('.');
+    const val = path.reduce((o, k) => o?.[k], state);
+    if (el.type === 'checkbox') el.checked = !!val; else el.value = val ?? '';
+    el.oninput = el.onchange = () => {
+      let o = state;
+      path.slice(0, -1).forEach(k => o = o[k]);
+      o[path[path.length - 1]] = el.type === 'checkbox' ? el.checked : el.type === 'number' ? Number(el.value) : el.value;
+      save(); render();
+    };
+  });
+  $('apiKey').value = apiKey;
+  $('imgPrompt').value = state.lastScene || '';
+}
+
+function greet() {
+  if (!state.messages.length && state.narrator.greeting) {
+    const text = state.narrator.greeting;
+    state.messages.push({ role: 'model', text, notes: [], scene: '', swipes: [{ text, notes: [], scene: '', updates: [] }], swipeIdx: 0 });
+  }
+}
+
+/* ---------- Events ---------- */
+$('tplHelp').textContent = 'Macros: {{narrator}} {{user}} {{userPersona}} {{style}} {{scenario}} {{summary}} {{npcs}} {{tagRules}}. Keep {{tagRules}} somewhere, or dialogue colors, dossier updates and scene prompts stop working.';
+
+$('send').onclick = () => {
+  const t = $('input').value.trim();
+  if (!t) return;
+  state.messages.forEach(m => delete m.prevNpcs);
+  state.messages.push({ role: 'user', text: t });
+  $('input').value = '';
+  save(); render(); reply();
+};
+$('input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); $('send').click(); }
+});
+$('regen').onclick = () => reply(true);
+$('imgBtn').onclick = () => { $('imgBar').hidden = !$('imgBar').hidden; };
+$('imgGen').onclick = () => drawImages($('imgPrompt').value);
+$('imgRewrite').onclick = rewriteScenePrompt;
+$('imgPrompt').oninput = () => { state.lastScene = $('imgPrompt').value; save(); };
+$('compactNow').onclick = async () => { busy(true); try { await compact(true); } catch (e) { setStatus('⚠ ' + e.message); } busy(false); };
+$('genNpc').onclick = generateNpcs;
+$('resetScene').onclick = () => { state.cfg.sceneRules = DEFAULT_SCENE_RULES; save(); bindFields(); };
+window.addEventListener('unhandledrejection', e => {
+  const why = e.reason?.message || String(e.reason || 'unknown error');
+  setStatus('⚠ Background error: ' + why + (/load failed|network/i.test(why) ? ' (a network request was cut off; if it happened while images were loading, try 1 image per generate)' : ''));
+  e.preventDefault();
+});
+
+$('log').onclick = e => {
+  const ds = e.target.dataset;
+  const lastIdx = state.messages.length - 1;
+  if (ds.prev !== undefined || ds.next !== undefined) {
+    const i = Number(ds.prev ?? ds.next), m = state.messages[i];
+    showSwipe(m, (m.swipeIdx || 0) + (ds.prev !== undefined ? -1 : 1), i === lastIdx);
+    save(); render(); renderNpcs();
+  }
+  if (ds.regen !== undefined) reply(true);
+  if (ds.pic !== undefined) {
+    setScene(state.messages[Number(ds.pic)].scene);
+    $('imgBar').hidden = false;
+    save(); drawImages(state.lastScene);
+  }
+  if (ds.edit !== undefined) {
+    const i = Number(ds.edit), m = state.messages[i], t = prompt('Edit message', m.text);
+    if (t !== null) {
+      m.text = t;
+      if (m.swipes) m.swipes[m.swipeIdx || 0].text = t;
+      save(); render();
+    }
+  }
+  if (ds.del !== undefined && confirm('Delete this message (all its versions)?')) {
+    const i = Number(ds.del);
+    state.messages.splice(i, 1);
+    if (i < state.summarizedUpTo) state.summarizedUpTo--;
+    save(); render();
+  }
+};
+
+$('openSettings').onclick = () => { bindFields(); renderNpcs(); $('sysPreview').textContent = ''; $('drawer').classList.add('open'); };
+$('closeSettings').onclick = () => { $('drawer').classList.remove('open'); if (!state.messages.length) { greet(); save(); } render(); };
+$('apiKey').oninput = () => { apiKey = $('apiKey').value.trim(); try { localStorage.setItem(KEY_STORE, apiKey); } catch (e) {} };
+$('previewSys').onclick = () => { $('sysPreview').textContent = systemPrompt(); };
+$('resetSys').onclick = () => {
+  if (!confirm('Replace your system prompt with the default?')) return;
+  state.systemTemplate = DEFAULT_TEMPLATE; save(); bindFields();
+};
+
+$('listModels').onclick = async () => {
+  try {
+    const res = await fetch(API_BASE + '?pageSize=200', { headers: { 'x-goog-api-key': apiKey } });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message || res.status);
+    const names = data.models.filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace('models/', ''));
+    $('modelList').innerHTML = names.map(n => `<button data-model="${esc(n)}">${escText(n)}</button>`).join('');
+  } catch (e) { $('modelList').textContent = '⚠ ' + e.message; }
+};
+$('modelList').onclick = e => {
+  const m = e.target.dataset.model;
+  if (m) { state.model = m; $('modelField').value = m; save(); }
+};
+
+$('addNpc').onclick = () => {
+  const n = Object.assign(blankNpc(), { color: nextColor(), locked: true });
+  state.npcs.push(n); save(); renderNpcs();
+};
+
+$('exportBtn').onclick = () => {
+  const out = clone(state);
+  out.messages.forEach(m => delete m.prevNpcs);
+  const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${state.narrator.name || 'story'}.json`;
+  a.click();
+};
+$('importFile').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try {
+    state = migrate(JSON.parse(await f.text()));
+    save(); bindFields(); renderNpcs(); render(); setStatus('Imported.');
+  } catch (err) { setStatus('⚠ Import failed: ' + err.message); }
+};
+$('newChat').onclick = () => {
+  if (!confirm('Start a new chat? Messages, summary and unpinned characters are cleared; setup, system prompt and pinned characters are kept.')) return;
+  Object.assign(state, { messages: [], summary: '', summarizedUpTo: 0, npcs: state.npcs.filter(n => n.pinned), lastScene: '' });
+  $('scene').innerHTML = ''; $('sceneWrap').hidden = true;
+  greet(); save(); bindFields(); renderNpcs(); render();
+};
+
+/* ---------- Start ---------- */
+greet(); save(); bindFields(); renderNpcs(); render();
+if (!apiKey) $('openSettings').click();
+})();
+</script>
