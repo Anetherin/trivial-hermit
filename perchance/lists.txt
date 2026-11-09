@@ -1,0 +1,1 @@
+t2i = {import:text-to-image-plugin}

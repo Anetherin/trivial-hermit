@@ -1,0 +1,124 @@
+<div id="app">
+  <header><h1 id="title">Tavern-lite</h1><button id="openSettings">⚙ Setup</button></header>
+  <details id="sceneWrap" open hidden>
+    <summary>Scene images</summary>
+    <div id="scene"></div>
+  </details>
+  <div id="imgBar" hidden>
+    <textarea id="imgPrompt" rows="4" placeholder="Image prompt. Character looks are filled in from the dossiers; edit freely. The image style from Setup is appended."></textarea>
+    <div class="row" style="margin-top:6px">
+      <button class="primary" id="imgGen">Generate</button>
+      <button id="imgRewrite">✨ Rewrite from scene</button>
+      <label class="inline"><input type="checkbox" data-bind="cfg.autoImage"> auto every reply</label>
+    </div>
+  </div>
+  <div id="log"></div>
+  <div id="status"></div>
+  <div id="composer">
+    <textarea id="input" placeholder="Say or do something…"></textarea>
+    <button class="primary" id="send">Send</button>
+  </div>
+  <div id="tools">
+    <button id="regen">↻ Regenerate</button>
+    <button id="imgBtn">🎨 Image</button>
+    <button id="compactNow">🗜 Compact now</button>
+  </div>
+</div>
+
+<div id="drawer">
+  <section>
+    <div class="row"><h2 style="margin:0;flex:1">Setup</h2><button id="closeSettings" class="mini">Close</button></div>
+
+    <h2>Gemini API</h2>
+    <label>API key (stored only in this browser, never in the generator source)</label>
+    <input id="apiKey" type="password" autocomplete="off">
+    <label>Model</label>
+    <div class="row"><input id="modelField" data-bind="model"><button id="listModels" class="mini">List models</button></div>
+    <div id="modelList"></div>
+
+    <h2>You</h2>
+    <label>Name and dialogue color</label>
+    <div class="row"><input type="color" data-bind="userColor"><input data-bind="userName"></div>
+    <label>About you (who your character is)</label><textarea data-bind="userDesc" rows="3"></textarea>
+    <label>Your appearance (added to image prompts when you're in the scene)</label><textarea data-bind="userLook" rows="2"></textarea>
+
+    <h2>Narrator</h2>
+    <label>Name and accent color</label>
+    <div class="row"><input type="color" data-bind="narrator.color"><input data-bind="narrator.name"></div>
+    <label>Narration style (voice, point of view, tone, pacing)</label><textarea data-bind="narrator.style" rows="4"></textarea>
+    <label>Scenario (world, setting, premise)</label><textarea data-bind="narrator.scenario" rows="4"></textarea>
+    <label>Opening message (used on a new chat)</label><textarea data-bind="narrator.greeting" rows="3"></textarea>
+
+    <h2>System prompt</h2>
+    <div class="hint" id="tplHelp"></div>
+    <textarea data-bind="systemTemplate" rows="14" style="font-size:13px;margin-top:6px"></textarea>
+    <div class="row" style="margin-top:6px">
+      <button id="previewSys" class="mini">Preview filled prompt</button>
+      <button id="resetSys" class="mini">Reset to default</button>
+    </div>
+    <pre id="sysPreview"></pre>
+
+    <h2>Reply tags</h2>
+    <div class="hint">Instructions the model gets through the tagRules macro. Tags are read out of each reply and stripped from what you see.</div>
+    <label class="inline" style="margin-top:6px"><input type="checkbox" data-bind="cfg.sayTags"> Color-tag dialogue by speaker</label>
+    <label class="inline" style="margin-top:6px"><input type="checkbox" data-bind="cfg.npcTags"> Character dossier updates inside replies</label>
+    <label class="inline" style="margin-top:6px"><input type="checkbox" data-bind="cfg.sceneTags"> Scene image prompt with every reply</label>
+    <label>Scene prompt rules (how Gemini writes image prompts)</label>
+    <textarea data-bind="cfg.sceneRules" rows="7" style="font-size:13px"></textarea>
+    <button id="resetScene" class="mini" style="margin-top:6px">Reset scene rules</button>
+
+    <h2>Images</h2>
+    <label>Style (appended to every image prompt)</label><input data-bind="imageStyle">
+    <div class="row">
+      <div><label>Resolution</label><select data-bind="cfg.imgRes"><option>768x512</option><option>512x768</option><option>512x512</option></select></div>
+      <div><label>Images per generate</label><select data-bind="cfg.imgCount"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
+    </div>
+
+    <h2>Memory</h2>
+    <label>Story summary (written by compaction; editable)</label><textarea data-bind="summary" rows="6"></textarea>
+    <div class="row">
+      <div><label>Keep recent messages verbatim</label><input type="number" data-bind="cfg.keepRecent"></div>
+      <div><label>Compact when over</label><input type="number" data-bind="cfg.compactAt"></div>
+    </div>
+
+    <h2>Characters</h2>
+    <div class="hint">Every character is a dossier. Pinned ones are always in the prompt; others are added when their name or an alias appears in the last 8 messages. Locked ones don't change automatically; the model's edits wait as suggestions.</div>
+    <div class="genbox">
+      <label style="margin-top:0">Generate characters (leave blank to fit the current story)</label>
+      <textarea id="npcIdea" rows="2" placeholder="e.g. a weary innkeeper who knows too much"></textarea>
+      <div class="row" style="margin-top:6px">
+        <label class="inline">How many <input type="number" id="npcCount" value="1" min="1" max="5" style="width:60px"></label>
+        <button id="genNpc" class="primary">✨ Generate</button>
+      </div>
+    </div>
+    <div class="genbox">
+      <label style="margin-top:0">Import from Hollowmere Nights (visiting guests)</label>
+      <div class="row">
+        <input data-bind="cfg.lanternUrl" placeholder="https://anetherin.github.io/penchant-lantern/">
+        <button id="lanternLoad" class="mini">Load</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label class="inline"><input type="checkbox" data-bind="cfg.lanternResidents"> include the game's own ladies</label>
+        <label class="inline">or a file <input type="file" id="lanternFile" accept=".json" style="width:auto"></label>
+      </div>
+      <div id="lanternPick" hidden>
+        <input id="lanternFilter" placeholder="Filter by name or pack" style="margin-top:6px">
+        <div id="lanternList"></div>
+        <div class="row" style="margin-top:6px">
+          <label class="inline"><input type="checkbox" id="lanternPin"> pin (always in prompt)</label>
+          <button id="lanternImport" class="primary">Import selected</button>
+        </div>
+      </div>
+      <div class="hint">Imported characters keep a link to the game; importing one again refreshes her dossier (locked ones get a suggestion instead).</div>
+    </div>
+    <div id="npcList"></div>
+    <button id="addNpc">+ Add blank character</button>
+
+    <h2>Data</h2>
+    <div class="row">
+      <button id="exportBtn">Export story</button>
+      <input type="file" id="importFile" accept=".json">
+      <button id="newChat">New chat</button>
+    </div>
+  </section>
+</div>

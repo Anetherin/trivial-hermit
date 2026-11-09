@@ -46,6 +46,10 @@ label.inline input{width:auto}
 #sysPreview{white-space:pre-wrap;font-size:12px;background:var(--panel);border-radius:8px;padding:8px;max-height:300px;overflow:auto}
 #sysPreview:empty{display:none}
 #modelList button{margin:3px 3px 0 0;font-size:12px;padding:3px 8px}
+#lanternList details{margin-top:6px}
+#lanternList summary{cursor:pointer;font-size:13px}
+.lanternPack{display:flex;flex-wrap:wrap;gap:4px 14px;padding:6px 0 0 12px}
+.lanternPack small{color:var(--acc)}
 </style>
 
 <div id="app">
@@ -141,6 +145,26 @@ label.inline input{width:auto}
         <button id="genNpc" class="primary">✨ Generate</button>
       </div>
     </div>
+    <div class="genbox">
+      <label style="margin-top:0">Import from Hollowmere Nights (visiting guests)</label>
+      <div class="row">
+        <input data-bind="cfg.lanternUrl" placeholder="https://anetherin.github.io/penchant-lantern/">
+        <button id="lanternLoad" class="mini">Load</button>
+      </div>
+      <div class="row" style="margin-top:6px">
+        <label class="inline"><input type="checkbox" data-bind="cfg.lanternResidents"> include the game's own ladies</label>
+        <label class="inline">or a file <input type="file" id="lanternFile" accept=".json" style="width:auto"></label>
+      </div>
+      <div id="lanternPick" hidden>
+        <input id="lanternFilter" placeholder="Filter by name or pack" style="margin-top:6px">
+        <div id="lanternList"></div>
+        <div class="row" style="margin-top:6px">
+          <label class="inline"><input type="checkbox" id="lanternPin"> pin (always in prompt)</label>
+          <button id="lanternImport" class="primary">Import selected</button>
+        </div>
+      </div>
+      <div class="hint">Imported characters keep a link to the game; importing one again refreshes her dossier (locked ones get a suggestion instead).</div>
+    </div>
     <div id="npcList"></div>
     <button id="addNpc">+ Add blank character</button>
 
@@ -154,8 +178,11 @@ label.inline input{width:auto}
 </div>
 
 <script>
+window.TH_DATA = {"prompts":{"_readme":["Default texts for Tavern-lite. Edit freely; long texts are arrays of lines (joined with newlines).","These are only defaults: Setup in the app keeps your own edited copy, and the Reset buttons go back to what is here.","systemTemplate macros: {{narrator}} {{user}} {{userPersona}} {{style}} {{scenario}} {{summary}} {{npcs}} {{tagRules}}."],"style":"Third person, past tense. Vivid and sensory without purple prose. Characters have their own goals and push back. Natural, distinct dialogue for each character.","sceneRules":["Write it for an image generator, which only understands concrete visual terms and has not read the story.","- Name each character in frame (their looks are filled in automatically from the dossiers).","- Be faithful and specific to what is happening in the prose right now: actions, body positions, physical contact, clothing and its state, expressions, props. Do not soften, omit or replace details with euphemisms or vague mood words.","- Depict every character as an adult.","- Then the setting, lighting, mood and camera angle or framing.","- Comma-separated phrases, 50–100 words."],"systemTemplate":["You are the narrator ({{narrator}}) of an ongoing interactive story. You describe the world and voice every character except {{user}}, who is controlled by the user.","","## Narration style","{{style}}","","## Scenario","{{scenario}}","","## {{user}}","{{userPersona}}","","## Story so far","{{summary}}","","## Characters","{{npcs}}","","## Rules","- Never write {{user}}'s dialogue, actions or thoughts.","- Stay consistent with the story so far and the character dossiers.","- *Actions in asterisks*. Usually 1–4 paragraphs.","- Stop at a point where {{user}} can respond.","","{{tagRules}}"]}};
+window.TH_PLUGINS = { t2i: (typeof t2i !== 'undefined') ? t2i : null };
 (() => {
-const $ = id => document.getElementById(id);
+/* ---- js/core.js ---- */
+const byId = id => document.getElementById(id);
 const QUOTE = String.fromCharCode(34);
 const API_BASE = 'https:' + '/' + '/generativelanguage.googleapis.com/v1beta/models';
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -165,39 +192,12 @@ const FIELDS = ['appearance', 'personality', 'history', 'status'];
 const PALETTE = ['#e07a5f', '#81b29a', '#f2cc8f', '#9fb4ff', '#d291bc', '#6ec6ca', '#c3a6ff', '#f4a259', '#a3c94f', '#ffd166', '#7fd8be', '#ff9e7d'];
 const cap = s => s[0].toUpperCase() + s.slice(1);
 
-const DEFAULT_STYLE = 'Third person, past tense. Vivid and sensory without purple prose. Characters have their own goals and push back. Natural, distinct dialogue for each character.';
-
-const DEFAULT_SCENE_RULES = `Write it for an image generator, which only understands concrete visual terms and has not read the story.
-- Name each character in frame (their looks are filled in automatically from the dossiers).
-- Be faithful and specific to what is happening in the prose right now: actions, body positions, physical contact, clothing and its state, expressions, props. Do not soften, omit or replace details with euphemisms or vague mood words.
-- Depict every character as an adult.
-- Then the setting, lighting, mood and camera angle or framing.
-- Comma-separated phrases, 50–100 words.`;
-
-const DEFAULT_TEMPLATE = `You are the narrator ({{narrator}}) of an ongoing interactive story. You describe the world and voice every character except {{user}}, who is controlled by the user.
-
-## Narration style
-{{style}}
-
-## Scenario
-{{scenario}}
-
-## {{user}}
-{{userPersona}}
-
-## Story so far
-{{summary}}
-
-## Characters
-{{npcs}}
-
-## Rules
-- Never write {{user}}'s dialogue, actions or thoughts.
-- Stay consistent with the story so far and the character dossiers.
-- *Actions in asterisks*. Usually 1–4 paragraphs.
-- Stop at a point where {{user}} can respond.
-
-{{tagRules}}`;
+/* Default texts live in data/prompts.json (window.TH_DATA.prompts). */
+const TXT = (window.TH_DATA || {}).prompts || {};
+const lines = v => Array.isArray(v) ? v.join("\n") : String(v || "");
+const DEFAULT_STYLE = lines(TXT.style);
+const DEFAULT_SCENE_RULES = lines(TXT.sceneRules);
+const DEFAULT_TEMPLATE = lines(TXT.systemTemplate);
 
 const defaults = () => ({
   v: 3,
@@ -208,7 +208,7 @@ const defaults = () => ({
   systemTemplate: DEFAULT_TEMPLATE,
   messages: [], summary: '', summarizedUpTo: 0,
   npcs: [], lastScene: '',
-  cfg: { keepRecent: 16, compactAt: 36, sayTags: true, npcTags: true, sceneTags: true, autoImage: false, imgRes: '768x512', imgCount: '2', sceneRules: DEFAULT_SCENE_RULES }
+  cfg: { keepRecent: 16, compactAt: 36, sayTags: true, npcTags: true, sceneTags: true, autoImage: false, imgRes: '768x512', imgCount: '2', sceneRules: DEFAULT_SCENE_RULES, lanternUrl: 'https:' + '/' + '/anetherin.github.io/penchant-lantern/', lanternResidents: false }
 });
 
 function validColor(c) {
@@ -245,6 +245,7 @@ function migrate(raw) {
   s.cfg = Object.assign(defaults().cfg, s.cfg);
   s.npcs = (s.npcs || []).map(n => {
     const o = Object.assign(blankNpc(n.name || 'Unnamed'), { aliases: n.aliases || [], color: validColor(n.color), pinned: !!n.pinned, locked: !!n.locked, pending: n.pending || null });
+    if (n.source) o.source = n.source; /* e.g. 'lantern:hinata' for characters imported from Hollowmere Nights */
     FIELDS.forEach(f => o[f] = n[f] || '');
     if (n.notes && !o.history) o.history = n.notes;
     return o;
@@ -267,12 +268,13 @@ function save() {
   try { localStorage.setItem(STATE_STORE, JSON.stringify(state)); }
   catch (e) { setStatus('Could not save — browser storage is blocked. Use Export.'); }
 }
-function setStatus(t) { $('status').textContent = t; }
-function busy(b) { ['send', 'regen', 'imgGen', 'imgRewrite', 'compactNow', 'genNpc'].forEach(id => $(id).disabled = b); }
+function setStatus(t) { byId('status').textContent = t; }
+function busy(b) { ['send', 'regen', 'imgGen', 'imgRewrite', 'compactNow', 'genNpc'].forEach(id => byId(id).disabled = b); }
 function escText(s) { return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function esc(s) { return escText(s).split(QUOTE).join('&quot;'); }
 const ask = text => [{ role: 'user', parts: [{ text }] }];
 
+/* ---- js/gemini.js ---- */
 /* ---------- Gemini ---------- */
 async function gemini(system, contents, { temperature = 0.9 } = {}) {
   if (!apiKey) throw new Error('Add your Gemini API key in Setup.');
@@ -324,6 +326,7 @@ function transcript(msgs) {
   return msgs.map(m => `${m.role === 'user' ? state.userName : 'Story'}: ${stripSay(m.text)}`).join('\n\n');
 }
 
+/* ---- js/prompt.js ---- */
 /* ---------- Character lookup & colors ---------- */
 function findNpc(name) {
   const k = String(name || '').trim().toLowerCase();
@@ -387,6 +390,7 @@ function systemPrompt(msgs = state.messages) {
   return state.systemTemplate.replace(/\{\{(\w+)\}\}/g, (m, k) => (k in macros ? macros[k] : m));
 }
 
+/* ---- js/tags.js ---- */
 /* ---------- Reading tags out of replies ---------- */
 function attr(attrs, name) {
   const m = attrs.match(new RegExp(name + '\\s*=\\s*' + QUOTE + '([^' + QUOTE + ']*)' + QUOTE, 'i'));
@@ -452,9 +456,45 @@ function expandScene(scene) {
 function setScene(scene) {
   if (!scene) return;
   state.lastScene = expandScene(scene);
-  $('imgPrompt').value = state.lastScene;
+  byId('imgPrompt').value = state.lastScene;
 }
 
+/* ---- js/images.js ---- */
+/* ---------- Images ---------- */
+function drawImages(p) {
+  p = String(p || '').trim();
+  if (!p) { setStatus('No image prompt yet — send a message or write one.'); return; }
+  const style = state.imageStyle.trim();
+  const prompt = style ? `${p}, ${style}` : p;
+  const count = Math.max(1, Math.min(4, Number(state.cfg.imgCount) || 2));
+  const t2i = (window.TH_PLUGINS || {}).t2i || window.t2i;
+  if (typeof t2i !== 'function') { setStatus('Image generation only works inside Perchance (needs the text-to-image plugin).'); return; }
+  try {
+    let html = '';
+    for (let i = 0; i < count; i++) html += `<div class="shot">${t2i({ prompt, resolution: state.cfg.imgRes || '768x512' })}</div>`;
+    byId('scene').innerHTML = html;
+    byId('sceneWrap').hidden = false;
+    byId('sceneWrap').open = true;
+  } catch (e) { setStatus('⚠ Image plugin error: ' + e.message); }
+}
+
+async function rewriteScenePrompt() {
+  busy(true);
+  try {
+    setStatus('Writing image prompt…');
+    const present = activeNpcs().map(n => n.name).concat(state.userName).join(', ');
+    const sys = `Turn the latest moment of a story into one image prompt. Characters who may be in frame: ${present}.\n${state.cfg.sceneRules || DEFAULT_SCENE_RULES}\nOutput only the prompt.`;
+    const latest = state.messages.slice(-4).map(m => stripSay(m.text)).join('\n\n');
+    setScene(await gemini(sys, ask(`Latest moment:\n${latest}`), { temperature: 0.5 }));
+    save(); setStatus('Prompt ready — edit it or hit Generate.');
+  } catch (e) {
+    setStatus('⚠ ' + e.message);
+  } finally {
+    busy(false);
+  }
+}
+
+/* ---- js/chat.js ---- */
 /* ---------- Chat & swipes ---------- */
 function showSwipe(m, idx, isLast) {
   m.swipeIdx = Math.max(0, Math.min(idx, m.swipes.length - 1));
@@ -518,8 +558,8 @@ async function compact(force = false) {
 
 /* ---------- Character generator ---------- */
 async function generateNpcs() {
-  const count = Math.max(1, Math.min(5, Number($('npcCount').value) || 1));
-  const idea = $('npcIdea').value.trim();
+  const count = Math.max(1, Math.min(5, Number(byId('npcCount').value) || 1));
+  const idea = byId('npcIdea').value.trim();
   busy(true);
   setStatus('Creating characters…');
   try {
@@ -531,7 +571,7 @@ Fill every field. Appearance must be concrete and visual so an image generator c
     const { updates } = parseReply(await gemini(sys, ask(input), { temperature: 1 }));
     const done = updates.map(applyUpdate).filter(Boolean);
     if (!done.length) throw new Error('No characters came back — try again.');
-    $('npcIdea').value = '';
+    byId('npcIdea').value = '';
     save(); renderNpcs(); render();
     setStatus(`Created: ${done.map(d => d.name).join(', ')}`);
   } catch (e) {
@@ -541,38 +581,7 @@ Fill every field. Appearance must be concrete and visual so an image generator c
   }
 }
 
-/* ---------- Images ---------- */
-function drawImages(p) {
-  p = String(p || '').trim();
-  if (!p) { setStatus('No image prompt yet — send a message or write one.'); return; }
-  const style = state.imageStyle.trim();
-  const prompt = style ? `${p}, ${style}` : p;
-  const count = Math.max(1, Math.min(4, Number(state.cfg.imgCount) || 2));
-  try {
-    let html = '';
-    for (let i = 0; i < count; i++) html += `<div class="shot">${t2i({ prompt, resolution: state.cfg.imgRes || '768x512' })}</div>`;
-    $('scene').innerHTML = html;
-    $('sceneWrap').hidden = false;
-    $('sceneWrap').open = true;
-  } catch (e) { setStatus('⚠ Image plugin error: ' + e.message); }
-}
-
-async function rewriteScenePrompt() {
-  busy(true);
-  try {
-    setStatus('Writing image prompt…');
-    const present = activeNpcs().map(n => n.name).concat(state.userName).join(', ');
-    const sys = `Turn the latest moment of a story into one image prompt. Characters who may be in frame: ${present}.\n${state.cfg.sceneRules || DEFAULT_SCENE_RULES}\nOutput only the prompt.`;
-    const latest = state.messages.slice(-4).map(m => stripSay(m.text)).join('\n\n');
-    setScene(await gemini(sys, ask(`Latest moment:\n${latest}`), { temperature: 0.5 }));
-    save(); setStatus('Prompt ready — edit it or hit Generate.');
-  } catch (e) {
-    setStatus('⚠ ' + e.message);
-  } finally {
-    busy(false);
-  }
-}
-
+/* ---- js/render.js ---- */
 /* ---------- Rendering ---------- */
 function fmt(t) { return escText(t).replace(/\*([^*\n]+)\*/g, '<em>$1</em>'); }
 function quoteColor(html, color) {
@@ -592,8 +601,8 @@ function renderText(m) {
 }
 
 function render() {
-  $('title').textContent = state.narrator.name || 'Tavern-lite';
-  const log = $('log');
+  byId('title').textContent = state.narrator.name || 'Tavern-lite';
+  const log = byId('log');
   log.innerHTML = '';
   const lastIdx = state.messages.length - 1;
   state.messages.forEach((m, i) => {
@@ -619,7 +628,7 @@ function render() {
 }
 
 function renderNpcs() {
-  const box = $('npcList');
+  const box = byId('npcList');
   box.innerHTML = '';
   state.npcs.forEach((n, i) => {
     const d = document.createElement('div');
@@ -669,8 +678,8 @@ function bindFields() {
       save(); render();
     };
   });
-  $('apiKey').value = apiKey;
-  $('imgPrompt').value = state.lastScene || '';
+  byId('apiKey').value = apiKey;
+  byId('imgPrompt').value = state.lastScene || '';
 }
 
 function greet() {
@@ -680,35 +689,219 @@ function greet() {
   }
 }
 
-/* ---------- Events ---------- */
-$('tplHelp').textContent = 'Macros: {{narrator}} {{user}} {{userPersona}} {{style}} {{scenario}} {{summary}} {{npcs}} {{tagRules}}. Keep {{tagRules}} somewhere, or dialogue colors, dossier updates and scene prompts stop working.';
+/* ---- js/lantern.js ---- */
+/* ---------- Import characters from Hollowmere Nights (penchant-lantern) ----------
+   Reads the game's data files straight from its GitHub Pages site (or from a file you pick):
+     data/guests.json      visiting crossover ladies, grouped into packs
+     data/characters.json  the game's own named ladies (optional)
+     data/races.json, data/body.json  only used to word the appearance text
+   Each picked character becomes a dossier. Imported dossiers remember their source ('lantern:<key>'),
+   so importing again updates them instead of making duplicates (locked ones get a suggested update). */
 
-$('send').onclick = () => {
-  const t = $('input').value.trim();
+let lanternData = null;      /* { chars: {key: {...c, pack, packLabel}}, races, body } */
+
+function lanternBase() {
+  let b = String(state.cfg.lanternUrl || '').trim();
+  if (!b) b = defaults().cfg.lanternUrl;
+  return b.endsWith('/') ? b : b + '/';
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url + '?v=' + Date.now());
+  if (!res.ok) throw new Error(`${url.split('/').pop()}: HTTP ${res.status}`);
+  return res.json();
+}
+
+const realKeys = o => Object.keys(o || {}).filter(k => k[0] !== '_');
+
+/* Turn guests.json / characters.json content into one flat {key: character} map. */
+function lanternFlatten(guests, residents) {
+  const chars = {};
+  if (guests && guests.packs) {
+    for (const p of realKeys(guests.packs)) {
+      const P = guests.packs[p];
+      for (const k of realKeys(P.characters)) chars[k] = Object.assign({}, P.characters[k], { pack: p, packLabel: P.label || p });
+    }
+  }
+  if (residents) {
+    for (const k of realKeys(residents)) {
+      const c = residents[k];
+      if (c && c.name && !chars[k]) chars[k] = Object.assign({}, c, { pack: '_residents', packLabel: 'Hollowmere residents' });
+    }
+  }
+  return chars;
+}
+
+async function loadLantern() {
+  const base = lanternBase();
+  setStatus('Loading Hollowmere Nights characters…');
+  const wantResidents = !!state.cfg.lanternResidents;
+  const [guests, residents, races, body] = await Promise.all([
+    fetchJson(base + 'data/guests.json'),
+    wantResidents ? fetchJson(base + 'data/characters.json').catch(() => null) : null,
+    fetchJson(base + 'data/races.json').catch(() => null),
+    fetchJson(base + 'data/body.json').catch(() => null)
+  ]);
+  lanternData = { chars: lanternFlatten(guests, residents), races: races && races.races, body };
+  setStatus(`Loaded ${Object.keys(lanternData.chars).length} characters.`);
+  renderLantern();
+}
+
+/* A guests.json or characters.json picked from disk. */
+async function loadLanternFile(file) {
+  const data = JSON.parse(await file.text());
+  const chars = data.packs ? lanternFlatten(data, null) : lanternFlatten(null, data);
+  if (!Object.keys(chars).length) throw new Error('No characters found. Pick data/guests.json or data/characters.json.');
+  lanternData = Object.assign(lanternData || { races: null, body: null }, { chars: Object.assign({}, (lanternData || {}).chars, chars) });
+  setStatus(`Loaded ${Object.keys(chars).length} characters from ${file.name}.`);
+  renderLantern();
+}
+
+/* ----- wording ----- */
+function raceLook(c) {
+  const r = (lanternData.races || {})[c.race] || {};
+  const sub = c.sub && r.subs && r.subs[c.sub];
+  if (sub && sub.look) return sub.look;
+  if (c.race === 'beastkin') return `${c.sub || 'beast'}kin woman with ${c.sub || 'animal'} ears and a ${c.sub || 'furry'} tail`;
+  return r.look || `${c.race || 'human'} woman`;
+}
+function bodyLook(c) {
+  const b = c.body || {}, defs = lanternData.body || {};
+  return ['height', 'figure', 'bust'].map(k => {
+    if (!b[k] || (k === 'height' && b[k] === 'average')) return '';
+    const e = defs[k] && defs[k][b[k]];
+    return e ? (e.img || '') : `${b[k]} ${k === 'bust' ? 'bust' : k}`;
+  }).filter(Boolean).join(', ');
+}
+function lanternAppearance(c) {
+  const d = c.design || {};
+  const outfit = realKeys(c.outfits).map(k => c.outfits[k]).find(o => o && o.prompt);
+  return [
+    `${c.age ? c.age + '-year-old ' : 'adult '}${raceLook(c)}`,
+    d.build && `${d.build} build`,
+    bodyLook(c),
+    (d.hairColor || d.hairStyle) && `${d.hairColor ? d.hairColor + ' hair' : 'hair'}${d.hairStyle ? ' (' + d.hairStyle + ')' : ''}`,
+    d.eyes && `${d.eyes} eyes`,
+    d.skin && `${d.skin} skin`,
+    d.features,
+    outfit && `usually wears ${outfit.prompt}`
+  ].filter(Boolean).join(', ');
+}
+function lanternPersonality(c) {
+  const bits = [c.personality];
+  if (c.traits && c.traits.length) bits.push(`Traits: ${c.traits.join(', ')}`);
+  if (c.style) bits.push(`Style: ${c.style}`);
+  if (c.unique && c.unique.name) bits.push(`${c.unique.name}: ${c.unique.desc || ''}`.trim());
+  return bits.filter(Boolean).join('. ').replace(/\.\./g, '.');
+}
+function lanternHistory(c) {
+  const out = [c.backstory || ''];
+  const bonds = realKeys(c.bonds).map(k => {
+    const b = c.bonds[k], other = lanternData.chars[k];
+    const who = other ? other.name : cap(k);
+    return `${who}${b.kind ? ` (${b.kind})` : ''}${b.note ? ': ' + b.note : ''}`;
+  });
+  if (bonds.length) out.push('Knows: ' + bonds.join('; '));
+  return out.filter(Boolean).join('\n');
+}
+
+/* favColor is a word like 'lavender'; let the browser turn it into hex, and skip colors too dark to read. */
+function lanternColor(word) {
+  const probe = document.createElement('span');
+  probe.style.color = 'rgb(1, 2, 3)';
+  probe.style.color = String(word || '').replace(/\s+/g, '');
+  document.body.append(probe);
+  const m = getComputedStyle(probe).color.match(/\d+/g);
+  probe.remove();
+  if (!m || m.slice(0, 3).join() === '1,2,3') return '';
+  const [r, g, b] = m.map(Number);
+  if (0.2126 * r + 0.7152 * g + 0.0722 * b < 90) return '';
+  return '#' + [r, g, b].map(x => x.toString(16).padStart(2, '0')).join('');
+}
+
+function lanternToNpc(key, c) {
+  const first = String(c.name || key).split(/\s+/)[0];
+  return {
+    name: c.name || cap(key),
+    aliases: first && first !== c.name ? [first] : [],
+    color: lanternColor(c.favColor),
+    appearance: lanternAppearance(c),
+    personality: lanternPersonality(c),
+    history: lanternHistory(c),
+    status: ''
+  };
+}
+
+function importLantern(keys, pinned) {
+  const done = [];
+  for (const key of keys) {
+    const c = lanternData.chars[key];
+    if (!c) continue;
+    const src = 'lantern:' + key, fresh = lanternToNpc(key, c);
+    let n = state.npcs.find(x => x.source === src) || findNpc(fresh.name);
+    if (!n) {
+      n = Object.assign(blankNpc(fresh.name), fresh, { source: src, pinned: !!pinned, color: fresh.color || nextColor() });
+      state.npcs.push(n);
+      done.push(`${n.name} added`);
+      continue;
+    }
+    n.source = src;
+    const fields = {};
+    FIELDS.forEach(f => { if (fresh[f] && fresh[f] !== n[f]) fields[f] = fresh[f]; });
+    if (!Object.keys(fields).length) { done.push(`${n.name} unchanged`); continue; }
+    if (n.locked) { n.pending = Object.assign(n.pending || {}, fields); done.push(`${n.name}: suggestion pending`); }
+    else { Object.assign(n, fields); n.aliases = [...new Set([...(n.aliases || []), ...fresh.aliases])]; done.push(`${n.name} updated`); }
+  }
+  save(); renderNpcs(); render(); renderLantern();
+  setStatus(done.length ? done.join(' · ') : 'Nothing picked.');
+}
+
+function renderLantern() {
+  const box = byId('lanternList');
+  if (!lanternData) { box.innerHTML = ''; return; }
+  const filter = byId('lanternFilter').value.trim().toLowerCase();
+  const have = new Set(state.npcs.map(n => n.source).filter(Boolean));
+  const wasOpen = new Set([...box.querySelectorAll('details[open]')].map(d => d.dataset.pack));
+  const byPack = {};
+  for (const [k, c] of Object.entries(lanternData.chars)) {
+    if (filter && !`${c.name} ${c.packLabel}`.toLowerCase().includes(filter)) continue;
+    (byPack[c.packLabel] = byPack[c.packLabel] || []).push([k, c]);
+  }
+  box.innerHTML = Object.entries(byPack).map(([label, list]) => `<details data-pack="${esc(label)}"${filter || wasOpen.has(label) ? ' open' : ''}><summary>${escText(label)} (${list.length})</summary><div class="lanternPack">${
+    list.map(([k, c]) => `<label class="inline"><input type="checkbox" data-lk="${esc(k)}"> ${escText(c.name)}${have.has('lantern:' + k) ? ' <small>✓</small>' : ''}</label>`).join('')
+  }</div></details>`).join('') || '<div class="hint">No matches.</div>';
+}
+
+/* ---- js/main.js ---- */
+/* ---------- Events ---------- */
+byId('tplHelp').textContent = 'Macros: {{narrator}} {{user}} {{userPersona}} {{style}} {{scenario}} {{summary}} {{npcs}} {{tagRules}}. Keep {{tagRules}} somewhere, or dialogue colors, dossier updates and scene prompts stop working.';
+
+byId('send').onclick = () => {
+  const t = byId('input').value.trim();
   if (!t) return;
   state.messages.forEach(m => delete m.prevNpcs);
   state.messages.push({ role: 'user', text: t });
-  $('input').value = '';
+  byId('input').value = '';
   save(); render(); reply();
 };
-$('input').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); $('send').click(); }
+byId('input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !('ontouchstart' in window)) { e.preventDefault(); byId('send').click(); }
 });
-$('regen').onclick = () => reply(true);
-$('imgBtn').onclick = () => { $('imgBar').hidden = !$('imgBar').hidden; };
-$('imgGen').onclick = () => drawImages($('imgPrompt').value);
-$('imgRewrite').onclick = rewriteScenePrompt;
-$('imgPrompt').oninput = () => { state.lastScene = $('imgPrompt').value; save(); };
-$('compactNow').onclick = async () => { busy(true); try { await compact(true); } catch (e) { setStatus('⚠ ' + e.message); } busy(false); };
-$('genNpc').onclick = generateNpcs;
-$('resetScene').onclick = () => { state.cfg.sceneRules = DEFAULT_SCENE_RULES; save(); bindFields(); };
+byId('regen').onclick = () => reply(true);
+byId('imgBtn').onclick = () => { byId('imgBar').hidden = !byId('imgBar').hidden; };
+byId('imgGen').onclick = () => drawImages(byId('imgPrompt').value);
+byId('imgRewrite').onclick = rewriteScenePrompt;
+byId('imgPrompt').oninput = () => { state.lastScene = byId('imgPrompt').value; save(); };
+byId('compactNow').onclick = async () => { busy(true); try { await compact(true); } catch (e) { setStatus('⚠ ' + e.message); } busy(false); };
+byId('genNpc').onclick = generateNpcs;
+byId('resetScene').onclick = () => { state.cfg.sceneRules = DEFAULT_SCENE_RULES; save(); bindFields(); };
 window.addEventListener('unhandledrejection', e => {
   const why = e.reason?.message || String(e.reason || 'unknown error');
   setStatus('⚠ Background error: ' + why + (/load failed|network/i.test(why) ? ' (a network request was cut off; if it happened while images were loading, try 1 image per generate)' : ''));
   e.preventDefault();
 });
 
-$('log').onclick = e => {
+byId('log').onclick = e => {
   const ds = e.target.dataset;
   const lastIdx = state.messages.length - 1;
   if (ds.prev !== undefined || ds.next !== undefined) {
@@ -719,7 +912,7 @@ $('log').onclick = e => {
   if (ds.regen !== undefined) reply(true);
   if (ds.pic !== undefined) {
     setScene(state.messages[Number(ds.pic)].scene);
-    $('imgBar').hidden = false;
+    byId('imgBar').hidden = false;
     save(); drawImages(state.lastScene);
   }
   if (ds.edit !== undefined) {
@@ -738,35 +931,35 @@ $('log').onclick = e => {
   }
 };
 
-$('openSettings').onclick = () => { bindFields(); renderNpcs(); $('sysPreview').textContent = ''; $('drawer').classList.add('open'); };
-$('closeSettings').onclick = () => { $('drawer').classList.remove('open'); if (!state.messages.length) { greet(); save(); } render(); };
-$('apiKey').oninput = () => { apiKey = $('apiKey').value.trim(); try { localStorage.setItem(KEY_STORE, apiKey); } catch (e) {} };
-$('previewSys').onclick = () => { $('sysPreview').textContent = systemPrompt(); };
-$('resetSys').onclick = () => {
+byId('openSettings').onclick = () => { bindFields(); renderNpcs(); byId('sysPreview').textContent = ''; byId('drawer').classList.add('open'); };
+byId('closeSettings').onclick = () => { byId('drawer').classList.remove('open'); if (!state.messages.length) { greet(); save(); } render(); };
+byId('apiKey').oninput = () => { apiKey = byId('apiKey').value.trim(); try { localStorage.setItem(KEY_STORE, apiKey); } catch (e) {} };
+byId('previewSys').onclick = () => { byId('sysPreview').textContent = systemPrompt(); };
+byId('resetSys').onclick = () => {
   if (!confirm('Replace your system prompt with the default?')) return;
   state.systemTemplate = DEFAULT_TEMPLATE; save(); bindFields();
 };
 
-$('listModels').onclick = async () => {
+byId('listModels').onclick = async () => {
   try {
     const res = await fetch(API_BASE + '?pageSize=200', { headers: { 'x-goog-api-key': apiKey } });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error?.message || res.status);
     const names = data.models.filter(m => (m.supportedGenerationMethods || []).includes('generateContent')).map(m => m.name.replace('models/', ''));
-    $('modelList').innerHTML = names.map(n => `<button data-model="${esc(n)}">${escText(n)}</button>`).join('');
-  } catch (e) { $('modelList').textContent = '⚠ ' + e.message; }
+    byId('modelList').innerHTML = names.map(n => `<button data-model="${esc(n)}">${escText(n)}</button>`).join('');
+  } catch (e) { byId('modelList').textContent = '⚠ ' + e.message; }
 };
-$('modelList').onclick = e => {
+byId('modelList').onclick = e => {
   const m = e.target.dataset.model;
-  if (m) { state.model = m; $('modelField').value = m; save(); }
+  if (m) { state.model = m; byId('modelField').value = m; save(); }
 };
 
-$('addNpc').onclick = () => {
+byId('addNpc').onclick = () => {
   const n = Object.assign(blankNpc(), { color: nextColor(), locked: true });
   state.npcs.push(n); save(); renderNpcs();
 };
 
-$('exportBtn').onclick = () => {
+byId('exportBtn').onclick = () => {
   const out = clone(state);
   out.messages.forEach(m => delete m.prevNpcs);
   const blob = new Blob([JSON.stringify(out, null, 2)], { type: 'application/json' });
@@ -775,7 +968,7 @@ $('exportBtn').onclick = () => {
   a.download = `${state.narrator.name || 'story'}.json`;
   a.click();
 };
-$('importFile').onchange = async e => {
+byId('importFile').onchange = async e => {
   const f = e.target.files[0];
   if (!f) return;
   try {
@@ -783,15 +976,34 @@ $('importFile').onchange = async e => {
     save(); bindFields(); renderNpcs(); render(); setStatus('Imported.');
   } catch (err) { setStatus('⚠ Import failed: ' + err.message); }
 };
-$('newChat').onclick = () => {
+byId('newChat').onclick = () => {
   if (!confirm('Start a new chat? Messages, summary and unpinned characters are cleared; setup, system prompt and pinned characters are kept.')) return;
   Object.assign(state, { messages: [], summary: '', summarizedUpTo: 0, npcs: state.npcs.filter(n => n.pinned), lastScene: '' });
-  $('scene').innerHTML = ''; $('sceneWrap').hidden = true;
+  byId('scene').innerHTML = ''; byId('sceneWrap').hidden = true;
   greet(); save(); bindFields(); renderNpcs(); render();
+};
+
+/* ---------- Hollowmere Nights import ---------- */
+byId('lanternLoad').onclick = async () => {
+  try { await loadLantern(); byId('lanternPick').hidden = false; }
+  catch (e) { setStatus('⚠ Could not load from ' + lanternBase() + ' (' + e.message + '). Check the address, or pick the file instead.'); }
+};
+byId('lanternFile').onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { await loadLanternFile(f); byId('lanternPick').hidden = false; }
+  catch (err) { setStatus('⚠ ' + err.message); }
+  e.target.value = '';
+};
+byId('lanternFilter').oninput = renderLantern;
+byId('lanternImport').onclick = () => {
+  const keys = [...document.querySelectorAll('#lanternList [data-lk]:checked')].map(x => x.dataset.lk);
+  importLantern(keys, byId('lanternPin').checked);
 };
 
 /* ---------- Start ---------- */
 greet(); save(); bindFields(); renderNpcs(); render();
-if (!apiKey) $('openSettings').click();
+if (!apiKey) byId('openSettings').click();
+
 })();
 </script>
